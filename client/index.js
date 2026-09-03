@@ -58,6 +58,18 @@ styles.insert(`
 .fs-note{padding:5px 8px;font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));border-top:1px solid var(--dsw-alias-border-l2)}
 input.fs-file{display:none}
 .fs-spin{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px;padding:8px}
+/* 预览浮层 */
+.fs-pv-backdrop{position:fixed;inset:0;z-index:2147483200;background:rgba(0,0,0,.42)}
+.fs-pv{position:fixed;z-index:2147483201;left:50%;top:50%;transform:translate(-50%,-50%);width:min(860px,92vw);height:min(70vh,560px);display:flex;flex-direction:column;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-2));border:1px solid var(--dsw-alias-border-inverted,var(--dsw-alias-border-l2));border-radius:12px;box-shadow:var(--dsw-shadow-lv3,0 10px 30px rgba(0,0,0,.3));overflow:hidden}
+.fs-pv-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
+.fs-pv-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.fs-pv-sub{font-size:12px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));flex:none;font-variant-numeric:tabular-nums}
+.fs-pv-body{flex:1;min-height:0;overflow:auto;padding:12px 14px;background:var(--dsw-alias-bg-layer-1)}
+.fs-pv-body pre{margin:0;font:12px/1.7 var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word;tab-size:2}
+.fs-pv-body img{max-width:100%;max-height:100%;object-fit:contain;display:block;margin:0 auto}
+.fs-pv-empty{padding:36px 0;text-align:center;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:13px}
+.fs-pv-foot{display:flex;gap:8px;align-items:center;padding:8px 14px;border-top:1px solid var(--dsw-alias-border-l2);flex:none}
+.fs-pv-foot .spacer{flex:1}
 `)
 
 async function readJson(response) {
@@ -98,6 +110,86 @@ function insertFileRef(sessionId, abs) {
   return 'copied'
 }
 
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'bmp', 'ico'])
+const TEXT_EXT = new Set(['txt', 'md', 'markdown', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'log', 'csv', 'tsv', 'env', 'xml', 'html', 'htm', 'css', 'scss', 'less', 'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'vue', 'svelte', 'py', 'rb', 'go', 'rs', 'java', 'c', 'h', 'cpp', 'hpp', 'cc', 'sh', 'bash', 'zsh', 'fish', 'sql', 'ps1', 'bat', 'cmake', 'dockerfile', 'makefile', 'properties', 'gitignore', 'editorconfig'])
+const TEXT_PREVIEW_LIMIT = 512 * 1024
+const IMAGE_PREVIEW_LIMIT = 32 * 1024 * 1024
+
+function extOf(name) {
+  const i = String(name || '').lastIndexOf('.')
+  return i >= 0 ? String(name).slice(i + 1).toLowerCase() : ''
+}
+
+/** 文件预览浮层：文本/代码直显、图片内联、超限或不支持给下载/@。 */
+function FilePreviewOverlay(props) {
+  const h = React.createElement
+  const { sessionId, workspace, rel, name, size, onClose, onAt } = props
+  const ext = extOf(name)
+  const kind = IMAGE_EXT.has(ext) ? 'img' : (TEXT_EXT.has(ext) || ext === '' ? 'text' : 'unknown')
+  const [state, setState] = React.useState({ status: 'loading' })
+
+  React.useEffect(() => {
+    let alive = true
+    let objectUrl = null
+    setState({ status: 'loading' })
+    const run = async () => {
+      try {
+        const isImg = kind === 'img'
+        const limit = isImg ? IMAGE_PREVIEW_LIMIT : TEXT_PREVIEW_LIMIT
+        if (typeof size === 'number' && size > limit) { if (alive) setState({ status: 'too-big', kind }); return }
+        const res = await fetch(`${API}/download?path=${encodeURIComponent(rel)}&${S(sessionId)}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+        if (!alive) return
+        if (isImg) {
+          objectUrl = URL.createObjectURL(blob)
+          setState({ status: 'img', url: objectUrl })
+        } else if (kind === 'text') {
+          setState({ status: 'text', text: await blob.text() })
+        } else {
+          setState({ status: 'unknown' })
+        }
+      } catch (e) {
+        if (alive) setState({ status: 'error', message: String((e && e.message) || e) })
+      }
+    }
+    void run()
+    return () => { alive = false; if (objectUrl) { try { URL.revokeObjectURL(objectUrl) } catch {} } }
+  }, [rel, name])
+
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !(e.isComposing === true)) onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  const body = () => {
+    if (state.status === 'loading') return h('div', { className: 'fs-pv-empty' }, '加载预览…')
+    if (state.status === 'text') return h('pre', null, state.text)
+    if (state.status === 'img') return h('img', { src: state.url, alt: name })
+    if (state.status === 'too-big') return h('div', { className: 'fs-pv-empty' }, `文件过大（${fmtSize(size)}），不支持在线预览，请下载或 @ 给 agent 查看。`)
+    if (state.status === 'unknown') return h('div', { className: 'fs-pv-empty' }, `暂不支持预览 .${ext} 类型，请下载或 @ 给 agent 处理。`)
+    return h('div', { className: 'fs-pv-empty' }, `预览失败：${state.message || ''}`)
+  }
+
+  return h('div', { className: 'fs-pv-backdrop', onClick: onClose },
+    h('div', { className: 'fs-pv', onClick: (e) => e.stopPropagation() },
+      h('div', { className: 'fs-pv-head' },
+        h('span', { className: 'fs-pv-title', title: rel }, name),
+        h('span', { className: 'fs-pv-sub' }, size != null ? fmtSize(size) : ''),
+        h('button', { className: 'fs-btn', onClick: onClose }, '✕'),
+      ),
+      h('div', { className: 'fs-pv-body' }, body()),
+      h('div', { className: 'fs-pv-foot' },
+        h('a', { className: 'fs-btn', style: { textDecoration: 'none' }, href: `${API}/download?path=${encodeURIComponent(rel)}&${S(sessionId)}` }, '下载'),
+        h('button', { className: 'fs-btn', style: { color: 'var(--dsw-alias-brand-primary)' }, onClick: () => onAt(rel, name) }, '@ 给 agent'),
+        h('span', { className: 'spacer' }),
+        h('span', { className: 'fs-path', style: { maxWidth: '50%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block' } }, workspace ? `${workspace}/${rel}` : rel),
+      ),
+    ),
+  )
+}
+
 /** conversation.view「文件」tab。 */
 function FileManagerTab(props) {
   const h = React.createElement
@@ -111,6 +203,7 @@ function FileManagerTab(props) {
   const [busy, setBusy] = React.useState(false)
   const [hint, setHint] = React.useState(null)
   const [reloadTick, setReloadTick] = React.useState(0)
+  const [preview, setPreview] = React.useState(null) // { rel, name, size }
 
   const loadDir = async (rel, silent) => {
     if (!sessionId) return null
@@ -205,6 +298,8 @@ function FileManagerTab(props) {
     setTimeout(() => setHint(null), 3500)
   }
 
+  const openPreview = (rel, name, size) => setPreview({ rel, name, size })
+
   if (!sessionId) return h('div', { className: 'fs-root' }, h('p', { className: 'fs-empty' }, '无会话上下文'))
   if (!ws && !error) return h('div', { className: 'fs-root' }, h('div', { className: 'fs-spin' }, '加载工作区…'))
   if (ws && !ws.ok) {
@@ -244,9 +339,10 @@ function FileManagerTab(props) {
       rows.push(h('div', { key: 'f:' + rel2, className: 'fs-row', style: { paddingLeft: 6 + (rel.split('/').filter(Boolean).length + 1) * 16 } },
         h('span', { className: 'fs-caret' }),
         h('span', { className: 'fs-ic' }, '📄'),
-        h('span', { className: 'fs-nm', title: f.name }, f.name),
+        h('span', { className: 'fs-nm', title: `${f.name}（点击预览）`, style: { cursor: 'pointer' }, onClick: () => openPreview(rel2, f.name, f.size) }, f.name),
         h('span', { className: 'fs-sz' }, fmtSize(f.size)),
         h('span', { className: 'fs-ops' },
+          h('button', { onClick: () => openPreview(rel2, f.name, f.size) }, '预览'),
           h('a', { href: `${API}/download?path=${encodeURIComponent(rel2)}&${S(sessionId)}` }, '下载'),
           h('button', { className: 'at', onClick: () => atRef(rel, f.name) }, '@'),
           h('button', { onClick: () => rename(rel2, f.name) }, '改名'),
@@ -292,7 +388,16 @@ function FileManagerTab(props) {
       renderLevel(''),
     ),
     h('div', { className: 'fs-note' },
-      hint || '上传/新建作用于当前目录（点击目录名展开并切换）；文件行悬停出现「下载 / @ / 改名 / 删除」。'),
+      hint || '点击文件名或行内「预览」查看内容；上传/新建作用于当前目录（点击目录名展开并切换）；文件行悬停出现操作按钮。'),
+    preview && h(FilePreviewOverlay, {
+      sessionId,
+      workspace: ws && ws.workspace,
+      rel: preview.rel,
+      name: preview.name,
+      size: preview.size,
+      onClose: () => setPreview(null),
+      onAt: atRef,
+    }),
   )
 }
 
