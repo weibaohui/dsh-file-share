@@ -1,14 +1,14 @@
 'use strict'
 
 /**
- * @weibaohui/dsh-file-share — Client half
+ * @weibaohui/dsh-file-share — Client half (v2: 会话工作区文件管理 tab)
  *
- * 在聊天输入框「+」区挂一个「📁 目录」按钮：
- *  点击弹出共享目录管理器（浏览共享根 → 新建文件夹 / 上传 / 下载 / 改名 / 删除）；
- *  点某个文件「插入 @」→ 把 @绝对路径 注入 composer 草稿，让 agent 处理该文件。
+ * 在对话区顶部 tab（conversation.view）注册「文件」：
+ *  点开显示当前会话工作区的目录树，就地管理——
+ *  上传（到当前目录）/ 下载 / 新建文件夹 / 改名 / 删除 / 搜索过滤 / 树形展开；
+ *  文件行「@」把 @绝对路径 注入 composer，让 agent 直接处理该文件。
  *
- * 数据通道是宿主同源路由 /dsh-file-share/api（无需 LAN token）。
- * 打开状态用模块级 store（侧边栏/composer 重挂载不会吞状态）。
+ * 数据通道：宿主同源路由 /dsh-file-share/api（带 sessionId，服务端以会话工作区为根）。
  */
 
 const API = '/dsh-file-share/api'
@@ -28,38 +28,36 @@ const styles = {
 }
 
 styles.insert(`
-.dd-trigger{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;cursor:pointer;transition:background .16s,border-color .16s}
-.dd-trigger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-label-primary) 18%,transparent)}
-.dd-triggerIcon{font-size:14px;line-height:1}
-.dd-backdrop{position:fixed;inset:0;z-index:2147483200;background:rgba(0,0,0,.38)}
-.dd-panel{position:fixed;z-index:2147483201;left:50%;top:50%;transform:translate(-50%,-50%);width:min(880px,94vw);height:min(640px,86vh);display:flex;flex-direction:column;background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-2));border:1px solid var(--dsw-alias-border-inverted,var(--dsw-alias-border-l2));border-radius:14px;box-shadow:var(--dsw-shadow-lv3,0 10px 30px rgba(0,0,0,.3));overflow:hidden}
-.dd-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
-.dd-headTitle{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary)}
-.dd-headMeta{font-size:12px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.dd-close{flex:none;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:15px;line-height:1}
-.dd-close:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}
-.dd-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
-.dd-crumb{display:flex;flex-wrap:wrap;gap:2px;align-items:center;min-width:0;flex:1;font-size:13px;color:var(--dsw-alias-label-secondary)}
-.dd-crumb a{color:var(--dsw-alias-label-primary);cursor:pointer;text-decoration:none}
-.dd-crumb a:hover{color:var(--dsw-alias-brand-primary)}
-.dd-btn{font-size:13px;padding:5px 11px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;transition:background .16s,border-color .16s;flex:none}
-.dd-btn:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-label-primary) 24%,var(--dsw-alias-border-l2))}
-.dd-btn:disabled{opacity:.5;cursor:default}
-.dd-btn.danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 32%,var(--dsw-alias-border-l2))}
-.dd-btn.danger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent)}
-.dd-search{flex:none;width:200px;padding:5px 10px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px}
-.dd-body{flex:1;overflow-y:auto;padding:6px 8px}
-.dd-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;font-size:13px}
-.dd-row:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent)}
-.dd-ic{flex:none;width:20px;text-align:center}
-.dd-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}
-.dd-nm.dir{cursor:pointer;font-weight:500}
-.dd-sz{flex:none;width:90px;text-align:right;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px;font-variant-numeric:tabular-nums}
-.dd-ops{display:flex;gap:6px;flex:none}
-.dd-empty{padding:36px 0;text-align:center;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:13px}
-.dd-note{padding:6px 12px;font-size:12px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));border-top:1px solid var(--dsw-alias-border-l2);flex:none}
-.dd-hint{font-size:11px;color:var(--dsw-alias-state-error-primary)}
-input.dd-file{display:none}
+.fs-root{display:flex;flex-direction:column;gap:10px;height:100%;min-height:240px;color:var(--dsw-alias-label-primary)}
+.fs-head{display:flex;flex-direction:column;gap:6px}
+.fs-title{font-size:14px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px}
+.fs-path{font-size:12px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));word-break:break-all;font-family:var(--ds-font-family-code,ui-monospace,monospace)}
+.fs-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fs-cur{font-size:12px;color:var(--dsw-alias-label-secondary);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-btn{font-size:12px;padding:4px 10px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;transition:background .16s,border-color .16s;flex:none}
+.fs-btn:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-label-primary) 24%,var(--dsw-alias-border-l2))}
+.fs-btn:disabled{opacity:.5;cursor:default}
+.fs-btn.danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 32%,var(--dsw-alias-border-l2))}
+.fs-search{width:160px;padding:4px 9px;border-radius:7px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;flex:none}
+.fs-body{flex:1;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:6px}
+.fs-row{display:flex;align-items:center;gap:6px;border-radius:7px;padding:3px 6px;font-size:13px;line-height:1.9}
+.fs-row:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent)}
+.fs-row[data-cur="true"]{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent)}
+.fs-caret{flex:none;width:14px;text-align:center;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));cursor:pointer;user-select:none;font-size:11px}
+.fs-ic{flex:none;width:18px;text-align:center}
+.fs-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default}
+.fs-nm.dir{cursor:pointer;font-weight:500}
+.fs-sz{flex:none;width:72px;text-align:right;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:11px;font-variant-numeric:tabular-nums}
+.fs-ops{display:none;gap:5px;flex:none}
+.fs-row:hover .fs-ops{display:flex}
+.fs-ops a,.fs-ops button{font-size:11px;padding:1px 7px;border-radius:6px;text-decoration:none;color:var(--dsw-alias-label-secondary);border:1px solid transparent;background:transparent;cursor:pointer}
+.fs-ops a:hover,.fs-ops button:hover{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-label-primary) 18%,transparent)}
+.fs-ops .at{color:var(--dsw-alias-brand-primary)}
+.fs-ops .danger{color:var(--dsw-alias-state-error-primary)}
+.fs-empty{padding:30px 0;text-align:center;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px}
+.fs-note{padding:5px 8px;font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));border-top:1px solid var(--dsw-alias-border-l2)}
+input.fs-file{display:none}
+.fs-spin{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px;padding:8px}
 `)
 
 async function readJson(response) {
@@ -77,77 +75,74 @@ function fmtSize(n) {
 
 function joinRel(a, b) { return (a ? a + '/' : '') + b }
 
-/** 注入 composer 草稿（dsh-process insertComposerText 同款机制）。 */
-function insertComposerText(scope, sessionId, input, text) {
-  const sessions = scope && scope.sessions
-  if (!sessions) return false
-  let actx
-  try { actx = sessions.scope(sessionId) } catch { return false }
-  if (actx === undefined || actx === null || typeof actx.bail !== 'function') return false
-  const draft = (input && input.draft) || ''
-  const at = draft.length
-  try {
-    return actx.bail(actx, 'slash/input-insert-text', {
-      text, span: { start: at, end: at, draftRev: (input && input.draftRev) || 0 },
-    }) === true
-  } catch { return false }
+const S = (sid, extra) => {
+  const p = new URLSearchParams(extra || {})
+  p.set('sessionId', sid)
+  return p.toString()
 }
 
-function refocusComposer() {
+/** @绝对路径 → composer（工作区文件可被宿主 file-reference 解析）。 */
+function insertFileRef(sessionId, abs) {
+  const text = '@' + abs + ' '
   try {
     const card = document.querySelector('[data-composer-card]')
     const ta = card && card.querySelector('textarea')
-    if (ta && typeof ta.focus === 'function') ta.focus()
+    if (ta && typeof document.execCommand === 'function') {
+      ta.focus()
+      const len = ta.value ? ta.value.length : 0
+      try { ta.setSelectionRange(len, len) } catch {}
+      if (document.execCommand('insertText', false, text)) return 'ok'
+    }
   } catch {}
+  try { navigator.clipboard.writeText(text) } catch {}
+  return 'copied'
 }
 
-/** 模块级 store：弹层开关在重挂载后仍保留。 */
-const panelStore = {
-  open: false,
-  listeners: new Set(),
-  set(v) { this.open = Boolean(v); this.listeners.forEach((fn) => fn(this.open)) },
-  subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn) },
-}
-
-function usePanelOpen() {
-  const [open, setOpen] = React.useState(panelStore.open)
-  React.useEffect(() => panelStore.subscribe(setOpen), [])
-  return [open, (v) => panelStore.set(v)]
-}
-
-/** 主管理器面板。 */
-function DirManager({ onClose, composerScopeRef, sessionId, input }) {
+/** conversation.view「文件」tab。 */
+function FileManagerTab(props) {
   const h = React.createElement
-  const [status, setStatus] = React.useState(null)
-  const [cur, setCur] = React.useState('')
-  const [entries, setEntries] = React.useState(null)
+  const sessionId = props && props.sessionId
+  const [ws, setWs] = React.useState(null)          // { ok, workspace }
+  const [cur, setCur] = React.useState('')          // 当前目录（相对工作区）
+  const [children, setChildren] = React.useState({}) // rel → {dirs, files} 懒加载缓存
+  const [open, setOpen] = React.useState({})         // rel → true 展开
   const [query, setQuery] = React.useState('')
   const [error, setError] = React.useState(null)
   const [busy, setBusy] = React.useState(false)
   const [hint, setHint] = React.useState(null)
+  const [reloadTick, setReloadTick] = React.useState(0)
 
-  const load = async (rel, silent) => {
+  const loadDir = async (rel, silent) => {
+    if (!sessionId) return null
     if (!silent) setError(null)
     try {
-      const st = await readJson(await fetch(`${API}/status`))
-      setStatus(st)
-      if (!st.enabled) { setEntries([]); return }
-      const d = await readJson(await fetch(`${API}/list?path=${encodeURIComponent(rel || '')}`))
-      setCur(d.dir || '')
-      setEntries(d.entries || [])
-      if (st.error) setError(st.error)
+      const d = await readJson(await fetch(`${API}/list?path=${encodeURIComponent(rel || '')}&${S(sessionId)}`))
+      const entries = d.entries || []
+      setChildren((prev) => ({ ...prev, [rel || '']: { dirs: entries.filter((e) => e.type === 'dir'), files: entries.filter((e) => e.type === 'file') } }))
+      return d
     } catch (e) {
-      setEntries([])
       if (!silent) setError(String((e && e.message) || e))
+      return null
     }
   }
 
   React.useEffect(() => {
-    void load('', true)
-    const onKey = (e) => { if (e.key === 'Escape' && !(e.isComposing === true)) onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [])
+    if (!sessionId) return
+    setWs(null); setError(null); setCur(''); setChildren({}); setOpen({})
+    fetch(`${API}/status?${S(sessionId)}`)
+      .then(readJson)
+      .then((s) => { setWs(s); return loadDir('', true) })
+      .then(() => {})
+      .catch((e) => setError(String((e && e.message) || e)))
+  }, [sessionId, reloadTick])
+
+  const toggle = (rel, name) => {
+    const key = rel
+    setCur(rel)
+    if (open[key]) { setOpen((o) => ({ ...o, [key]: false })); return }
+    setOpen((o) => ({ ...o, [key]: true }))
+    if (!children[key]) void loadDir(rel, true)
+  }
 
   const act = async (url, opts) => {
     setBusy(true); setError(null)
@@ -156,14 +151,14 @@ function DirManager({ onClose, composerScopeRef, sessionId, input }) {
     finally { setBusy(false) }
   }
 
-  const enter = (name) => { setQuery(''); void load(joinRel(cur, name)) }
-  const go = (rel) => { setQuery(''); void load(rel) }
-
   const mkdir = async () => {
     const n = window.prompt('新建文件夹名：')
     if (!n || !n.trim()) return
     const name = n.trim()
-    if (await act(`${API}/mkdir?path=${encodeURIComponent(joinRel(cur, name))}`, { method: 'POST' })) void load(cur, true)
+    const target = joinRel(cur, name)
+    if (await act(`${API}/mkdir?path=${encodeURIComponent(target)}&${S(sessionId)}`, { method: 'POST' })) {
+      if (open[cur] || !cur) await loadDir(cur, true)
+    }
   }
 
   const upload = async (files) => {
@@ -171,7 +166,7 @@ function DirManager({ onClose, composerScopeRef, sessionId, input }) {
     setBusy(true)
     for (const f of Array.from(files)) {
       try {
-        const r = await fetch(`${API}/upload?path=${encodeURIComponent(cur)}&name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f })
+        const r = await fetch(`${API}/upload?path=${encodeURIComponent(cur)}&name=${encodeURIComponent(f.name)}&${S(sessionId)}`, { method: 'POST', body: f })
         const payload = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error((payload && payload.error) || `HTTP ${r.status}`)
       } catch (e) {
@@ -179,129 +174,125 @@ function DirManager({ onClose, composerScopeRef, sessionId, input }) {
       }
     }
     setBusy(false)
-    void load(cur, true)
+    if (open[cur] || !cur) await loadDir(cur, true)
   }
 
-  const rename = async (rel, oldName) => {
-    const n = window.prompt('改名为：', oldName)
-    if (!n || !n.trim() || n.trim() === oldName) return
+  const rename = async (rel, name) => {
+    const n = window.prompt('改名为：', name)
+    if (!n || !n.trim() || n.trim() === name) return
     const idx = rel.lastIndexOf('/')
     const base = idx >= 0 ? rel.slice(0, idx) : ''
-    if (await act(`${API}/rename?from=${encodeURIComponent(rel)}&to=${encodeURIComponent(joinRel(base, n.trim()))}`, { method: 'POST' })) void load(cur, true)
+    if (await act(`${API}/rename?from=${encodeURIComponent(rel)}&to=${encodeURIComponent(joinRel(base, n.trim()))}&${S(sessionId)}`, { method: 'POST' })) {
+      await loadDir(base, true)
+    }
   }
 
   const remove = async (rel, name, isDir) => {
     if (!window.confirm(`删除 ${name} ？${isDir ? '（目录及其全部内容）' : ''}`)) return
-    if (await act(`${API}/delete?path=${encodeURIComponent(rel)}`, { method: 'DELETE' })) void load(cur, true)
+    const parent = rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : ''
+    if (await act(`${API}/delete?path=${encodeURIComponent(rel)}&${S(sessionId)}`, { method: 'DELETE' })) {
+      if (isDir) { setOpen((o) => { const n = { ...o }; delete n[rel]; return n }); setChildren((c) => { const n = { ...c }; delete n[rel]; return n }) }
+      await loadDir(parent, true)
+    }
   }
 
-  const insertAt = async (rel, name) => {
-    if (!status || !status.root) { setHint('目录共享未启用，无法引用文件'); return }
-    const abs = status.root.replace(/\/+$/, '') + '/' + joinRel(rel, name)
-    const scope = composerScopeRef ? composerScopeRef() : null
-    const ok = insertComposerText(scope, sessionId, input, `@${abs} `)
-    if (ok) { onClose(); refocusComposer() }
-    else setHint('注入失败：请手动把路径贴进输入框')
+  const atRef = (rel, name) => {
+    if (!ws || !ws.workspace) { setHint('工作区不可用'); return }
+    const abs = ws.workspace.replace(/\/+$/, '') + '/' + joinRel(rel, name)
+    const result = insertFileRef(sessionId, abs)
+    if (result === 'ok') setHint(`已把 @${joinRel(rel, name)} 插入输入框`)
+    else setHint('无法自动插入，已复制到剪贴板，请在输入框粘贴')
+    setTimeout(() => setHint(null), 3500)
   }
 
-  const crumb = (dir) => {
-    const parts = dir ? dir.split('/').filter(Boolean) : []
-    const nodes = []
+  if (!sessionId) return h('div', { className: 'fs-root' }, h('p', { className: 'fs-empty' }, '无会话上下文'))
+  if (!ws && !error) return h('div', { className: 'fs-root' }, h('div', { className: 'fs-spin' }, '加载工作区…'))
+  if (ws && !ws.ok) {
+    return h('div', { className: 'fs-root' },
+      h('div', { className: 'fs-empty' }, `工作区不可用：${ws.error || ''}`),
+    )
+  }
+
+  const q = query.trim().toLowerCase()
+  const match = (name) => !q || name.toLowerCase().includes(q)
+
+  /** 渲染 rel 目录的一层（dirs 在前；dirs 有子层则递归到 open 状态）。 */
+  const renderLevel = (rel) => {
+    const node = children[rel || '']
+    const rows = []
+    if (!node) return rows
+    const shownDirs = node.dirs.filter((d) => match(d.name))
+    const shownFiles = node.files.filter((f) => match(f.name))
+    for (const d of shownDirs) {
+      const sub = joinRel(rel, d.name)
+      const isOpen = Boolean(open[sub])
+      const isCur = cur === sub
+      rows.push(h('div', { key: 'd:' + sub, className: 'fs-row', 'data-cur': isCur, style: { paddingLeft: 6 + rel.split('/').filter(Boolean).length * 16 } },
+        h('span', { className: 'fs-caret', onClick: () => toggle(sub, d.name) }, isOpen ? '▾' : '▸'),
+        h('span', { className: 'fs-ic' }, '📁'),
+        h('span', { className: 'fs-nm dir', title: d.name, onClick: () => toggle(sub, d.name) }, d.name),
+        h('span', { className: 'fs-ops' },
+          h('button', { onClick: (e) => { e.stopPropagation(); toggle(sub, d.name) } }, '进入'),
+          h('button', { onClick: (e) => { e.stopPropagation(); rename(sub, d.name) } }, '改名'),
+          h('button', { className: 'danger', onClick: (e) => { e.stopPropagation(); remove(sub, d.name, true) } }, '删除'),
+        ),
+      ))
+      if (isOpen) rows.push(...renderLevel(sub))
+    }
+    for (const f of shownFiles) {
+      const rel2 = joinRel(rel, f.name)
+      rows.push(h('div', { key: 'f:' + rel2, className: 'fs-row', style: { paddingLeft: 6 + (rel.split('/').filter(Boolean).length + 1) * 16 } },
+        h('span', { className: 'fs-caret' }),
+        h('span', { className: 'fs-ic' }, '📄'),
+        h('span', { className: 'fs-nm', title: f.name }, f.name),
+        h('span', { className: 'fs-sz' }, fmtSize(f.size)),
+        h('span', { className: 'fs-ops' },
+          h('a', { href: `${API}/download?path=${encodeURIComponent(rel2)}&${S(sessionId)}` }, '下载'),
+          h('button', { className: 'at', onClick: () => atRef(rel, f.name) }, '@'),
+          h('button', { onClick: () => rename(rel2, f.name) }, '改名'),
+          h('button', { className: 'danger', onClick: () => remove(rel2, f.name, false) }, '删除'),
+        ),
+      ))
+    }
+    return rows
+  }
+
+  const crumbParts = cur ? cur.split('/').filter(Boolean) : []
+  const crumb = () => {
+    const nodes = [h('a', { key: 'root', style: { cursor: 'pointer', color: 'var(--dsw-alias-brand-primary)' }, onClick: () => setCur('') }, '工作区')]
     let acc = ''
-    nodes.push(h('a', { key: 'root', onClick: () => go('') }, '共享根'))
-    parts.forEach((p, i) => {
+    crumbParts.forEach((p, i) => {
       acc = joinRel(acc, p)
       nodes.push(h('span', { key: 'sep' + i }, ' / '))
-      nodes.push(h('a', { key: i, onClick: () => go(acc) }, p))
+      nodes.push(h('a', { key: i, style: { cursor: 'pointer' }, onClick: () => setCur(acc) }, p))
     })
     return nodes
   }
 
-  const q = query.trim().toLowerCase()
-  const shown = (entries || []).filter((e) => !q || e.name.toLowerCase().includes(q))
+  const rootChildrenLoaded = Boolean(children[''])
 
-  if (status && !status.enabled) {
-    return h('div', { className: 'dd-backdrop', onClick: onClose },
-      h('div', { className: 'dd-panel', onClick: (e) => e.stopPropagation() },
-        h('div', { className: 'dd-head' },
-          h('span', { className: 'dd-headTitle' }, '📁 目录共享'),
-          h('span', { className: 'dd-headMeta' }, '未启用'),
-          h('button', { className: 'dd-close', onClick: onClose }, '✕'),
-        ),
-        h('div', { className: 'dd-empty' }, '共享根目录未配置：请在 设置 → dsh-file-share → root 填一个绝对路径，稍候自动生效。'),
-      ),
-    )
-  }
-
-  return h('div', { className: 'dd-backdrop', onClick: onClose },
-    h('div', { className: 'dd-panel', onClick: (e) => e.stopPropagation() },
-      h('div', { className: 'dd-head' },
-        h('span', { className: 'dd-headTitle' }, '📁 目录共享'),
-        h('span', { className: 'dd-headMeta', title: status ? status.root : '' },
-          status ? `${status.root}${status.running ? '' : '（服务器未运行）'}${status.readOnly ? ' · 只读' : ''}` : '加载中…'),
-        h('button', { className: 'dd-close', onClick: onClose }, '✕'),
-      ),
-      h('div', { className: 'dd-toolbar' },
-        h('div', { className: 'dd-crumb' }, crumb(cur)),
-        h('input', {
-          className: 'dd-search', placeholder: '过滤当前目录…', value: query,
-          onChange: (e) => setQuery(e.target.value),
-        }),
-        h('button', { className: 'dd-btn', disabled: busy, onClick: () => void load(cur) }, '刷新'),
-        !(status && status.readOnly) && h('button', { className: 'dd-btn', disabled: busy, onClick: () => void mkdir() }, '新建文件夹'),
-        !(status && status.readOnly) && h('label', { className: 'dd-btn', style: { cursor: 'pointer' } },
-          '上传',
-          h('input', { type: 'file', multiple: true, className: 'dd-file', onChange: (e) => { void upload(e.target.files); e.target.value = '' } }),
-        ),
-      ),
-      h('div', { className: 'dd-body' },
-        error && h('div', { className: 'dd-empty', style: { color: 'var(--dsw-alias-state-error-primary)', padding: '10px 0' } }, error),
-        !error && entries === null && h('div', { className: 'dd-empty' }, '加载中…'),
-        !error && entries !== null && shown.length === 0 && h('div', { className: 'dd-empty' }, query ? '无匹配项' : '（空目录）'),
-        !error && shown.map((e) => {
-          const rel = joinRel(cur, e.name)
-          const isDir = e.type === 'dir'
-          return h('div', { key: rel, className: 'dd-row' },
-            h('span', { className: 'dd-ic' }, isDir ? '📁' : '📄'),
-            h('span', { className: 'dd-nm' + (isDir ? ' dir' : ''), title: e.name, onClick: isDir ? () => enter(e.name) : undefined }, e.name),
-            h('span', { className: 'dd-sz' }, isDir ? '' : fmtSize(e.size)),
-            h('span', { className: 'dd-ops' },
-              isDir
-                ? null
-                : h('button', { className: 'dd-btn', onClick: () => void insertAt(cur, e.name) }, '插入 @'),
-              h('a', { className: 'dd-btn', style: { textDecoration: 'none', display: 'inline-block' }, href: `${API}/download?path=${encodeURIComponent(rel)}` }, '下载'),
-              !(status && status.readOnly) && h('button', { className: 'dd-btn', onClick: () => void rename(rel, e.name) }, '改名'),
-              !(status && status.readOnly) && h('button', { className: 'dd-btn danger', onClick: () => void remove(rel, e.name, isDir) }, '删除'),
-            ),
-          )
-        }),
-      ),
-      h('div', { className: 'dd-note' },
-        hint ? h('span', { className: 'dd-hint' }, hint)
-          : (status && status.url ? `浏览器共享地址：${status.url}（访问口令见设置或调用 file_share_status 查询）` : '浏览器共享服务器未运行（检查设置里的 host/port 与错误提示）'),
+  return h('div', { className: 'fs-root' },
+    h('div', { className: 'fs-head' },
+      h('p', { className: 'fs-title' }, '📁 文件', h('span', { style: { fontSize: '11px', fontWeight: 400, color: 'var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))' } }, ws && ws.workspace ? '会话工作区' : '')),
+      ws && ws.workspace && h('div', { className: 'fs-path', title: ws.workspace }, ws.workspace),
+    ),
+    h('div', { className: 'fs-bar' },
+      h('div', { className: 'fs-cur' }, crumb()),
+      h('input', { className: 'fs-search', placeholder: '过滤名称…', value: query, onChange: (e) => setQuery(e.target.value) }),
+      h('button', { className: 'fs-btn', disabled: busy, onClick: () => setReloadTick((t) => t + 1) }, '刷新'),
+      h('button', { className: 'fs-btn', disabled: busy, onClick: () => void mkdir() }, '新建文件夹'),
+      h('label', { className: 'fs-btn', style: { cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }, title: '上传到当前目录' },
+        '上传', h('input', { type: 'file', multiple: true, className: 'fs-file', onChange: (e) => { void upload(e.target.files); e.target.value = '' } }),
       ),
     ),
-  )
-}
-
-/** composer「+」区入口按钮。 */
-function FileShareButton({ composerScopeRef, sessionId, input }) {
-  const h = React.createElement
-  const [open, setOpen] = usePanelOpen()
-  return h(React.Fragment, null,
-    h('button', {
-      type: 'button', className: 'dd-trigger', title: '目录共享：浏览/上传/下载共享根的文件，或把文件 @ 进对话',
-      onClick: () => setOpen(true),
-    },
-      h('span', { className: 'dd-triggerIcon' }, '📁'),
-      h('span', null, '目录'),
+    h('div', { className: 'fs-body' },
+      error && h('div', { className: 'fs-empty', style: { color: 'var(--dsw-alias-state-error-primary)' } }, error),
+      !error && !rootChildrenLoaded && h('div', { className: 'fs-spin' }, '加载目录树…'),
+      !error && rootChildrenLoaded && renderLevel('').length === 0 && h('div', { className: 'fs-empty' }, query ? '无匹配项' : '（空目录）'),
+      renderLevel(''),
     ),
-    open && h(DirManager, {
-      onClose: () => setOpen(false),
-      composerScopeRef,
-      sessionId,
-      input,
-    }),
+    h('div', { className: 'fs-note' },
+      hint || '上传/新建作用于当前目录（点击目录名展开并切换）；文件行悬停出现「下载 / @ / 改名 / 删除」。'),
   )
 }
 
@@ -314,21 +305,10 @@ module.exports = {
     if (slots === undefined) return
     // 不 return 任何值（cordis-plugin-loader 把 apply 返回值当 disposable/effect）。
 
-    let composerScope = null
-    try {
-      if (typeof ctx.inject === 'function') {
-        ctx.inject(['inputTriggers', 'sessions'], (scope) => { composerScope = scope })
-      }
-    } catch (e) { /* inputTriggers/sessions 缺失时按钮仍在，注入会失败并提示 */ }
-
     if (typeof slots.inject === 'function') {
-      slots.inject('conversation.input.left', () => slots.register(
-        { name: 'conversation.input.left', id: '@weibaohui/dsh-file-share', order: 64, label: () => '目录' },
-        (apiProps) => React.createElement(FileShareButton, {
-          composerScopeRef: () => composerScope,
-          sessionId: apiProps && apiProps.sessionId,
-          input: apiProps && apiProps.input,
-        }),
+      slots.inject('conversation.view', () => slots.register(
+        { name: 'conversation.view', id: '@weibaohui/dsh-file-share', order: 27, label: () => '文件' },
+        (props) => React.createElement(FileManagerTab, props),
       ))
     }
   },
