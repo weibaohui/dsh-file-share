@@ -1,0 +1,15 @@
+# @weibaohui/dsh-file-share bundle patch: contributes the plugin row into the
+# host composition when this package is installed via `dsh plugin add`.
+#
+# The plugin is HOST-PLANE: it reads host services (settings, tools,
+# webServer) to (a) start an independent HTTP directory-share server for a
+# configurable root directory (browse/upload/download/mkdir/rename/delete with
+# token gate, path boundary and optional read-only mode), (b) expose the same
+# operations as same-origin routes under /dsh-file-share/api for its web client,
+# and (c) register file_share_* tools on the host tools registry (model-callable).
+# It must land in the host composition (this insert), never inside an agent
+# preset.
+
+- insert:
+    - id: dsh-file-share
+      name: '@weibaohui/dsh-file-share'

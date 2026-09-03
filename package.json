@@ -1,0 +1,30 @@
+{
+  "name": "@weibaohui/dsh-file-share",
+  "version": "0.1.0",
+  "description": "dsh 插件 · 目录共享：把任意一个可配置的目录变成可在线管理的共享区——浏览器(HTTP)浏览/上传/下载/新建文件夹/改名/删除，会话内可用 file_share_* 工具查状态与列目录，聊天输入框旁可打开目录文件管理器把文件 @ 进对话给 agent 处理。",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./client/bundle.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web" }
+  },
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/share-core.js && node --check client/index.js",
+    "test": "node --test \"test/*.test.js\"",
+    "build:client": "node scripts/build-client.mjs"
+  },
+  "keywords": ["dsh", "file-share", "file", "share", "upload", "download", "http"],
+  "dependencies": {},
+  "engines": { "node": ">=20" }
+}
