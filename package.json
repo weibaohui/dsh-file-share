@@ -11,6 +11,7 @@
   "files": [
     "src",
     "client",
+    "docs",
     "scripts",
     "cordis.patch.yml",
     "README.md"
