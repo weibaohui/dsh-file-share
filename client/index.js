@@ -55,6 +55,10 @@ styles.insert(`
 .fs-ops .at{color:var(--dsw-alias-brand-primary)}
 .fs-ops .danger{color:var(--dsw-alias-state-error-primary)}
 .fs-empty{padding:30px 0;text-align:center;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px}
+.fs-check{flex:none;accent-color:var(--dsw-alias-brand-primary);cursor:pointer;margin:0 2px}
+.fs-selbar{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,var(--dsw-alias-border-l2));border-radius:9px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,transparent);font-size:12px;flex:none}
+.fs-selbar .spacer{flex:1}
+.fs-selbar .muted{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
 .fs-note{padding:5px 8px;font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));border-top:1px solid var(--dsw-alias-border-l2)}
 input.fs-file{display:none}
 .fs-spin{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px;padding:8px}
@@ -204,6 +208,7 @@ function FileManagerTab(props) {
   const [hint, setHint] = React.useState(null)
   const [reloadTick, setReloadTick] = React.useState(0)
   const [preview, setPreview] = React.useState(null) // { rel, name, size }
+  const [sel, setSel] = React.useState(() => new Set()) // 勾选待打包的相对路径（文件/目录混选）
 
   const loadDir = async (rel, silent) => {
     if (!sessionId) return null
@@ -221,13 +226,55 @@ function FileManagerTab(props) {
 
   React.useEffect(() => {
     if (!sessionId) return
-    setWs(null); setError(null); setCur(''); setChildren({}); setOpen({})
+    setWs(null); setError(null); setCur(''); setChildren({}); setOpen({}); setSel(new Set())
     fetch(`${API}/status?${S(sessionId)}`)
       .then(readJson)
       .then((s) => { setWs(s); return loadDir('', true) })
       .then(() => {})
       .catch((e) => setError(String((e && e.message) || e)))
   }, [sessionId, reloadTick])
+
+  const toggleSel = (rel) => {
+    setSel((prev) => {
+      const next = new Set(prev)
+      if (next.has(rel)) next.delete(rel)
+      else next.add(rel)
+      return next
+    })
+  }
+
+  /** 打包下载（fetch→blob）：成功触发浏览器下载，失败在面板内报错，不用导航顶掉页面。 */
+  const zipDownload = async (rels) => {
+    const p = new URLSearchParams()
+    for (const rel of rels) p.append('path', rel)
+    p.set('sessionId', sessionId)
+    setBusy(true); setError(null)
+    try {
+      const res = await fetch(`${API}/download-zip?${p.toString()}`)
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error((payload && payload.error) || `HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      let filename = 'download.zip'
+      const m = /filename\*=UTF-8''([^;]+)/.exec(res.headers.get('content-disposition') || '')
+      if (m) { try { filename = decodeURIComponent(m[1]) } catch {} }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 5000)
+      setHint(`已打包下载 ${filename}（${rels.length} 项）`)
+      setTimeout(() => setHint(null), 3500)
+    } catch (e) {
+      setError(`打包下载失败：${(e && e.message) || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const toggle = (rel, name) => {
     const key = rel
@@ -323,11 +370,13 @@ function FileManagerTab(props) {
       const isOpen = Boolean(open[sub])
       const isCur = cur === sub
       rows.push(h('div', { key: 'd:' + sub, className: 'fs-row', 'data-cur': isCur, style: { paddingLeft: 6 + rel.split('/').filter(Boolean).length * 16 } },
+        h('input', { type: 'checkbox', className: 'fs-check', title: '选择以便打包下载', checked: sel.has(sub), onClick: (e) => e.stopPropagation(), onChange: () => toggleSel(sub) }),
         h('span', { className: 'fs-caret', onClick: () => toggle(sub, d.name) }, isOpen ? '▾' : '▸'),
         h('span', { className: 'fs-ic' }, '📁'),
         h('span', { className: 'fs-nm dir', title: d.name, onClick: () => toggle(sub, d.name) }, d.name),
         h('span', { className: 'fs-ops' },
           h('button', { onClick: (e) => { e.stopPropagation(); toggle(sub, d.name) } }, '进入'),
+          h('button', { disabled: busy, onClick: (e) => { e.stopPropagation(); void zipDownload([sub]) } }, '下载'),
           h('button', { onClick: (e) => { e.stopPropagation(); rename(sub, d.name) } }, '改名'),
           h('button', { className: 'danger', onClick: (e) => { e.stopPropagation(); remove(sub, d.name, true) } }, '删除'),
         ),
@@ -337,6 +386,7 @@ function FileManagerTab(props) {
     for (const f of shownFiles) {
       const rel2 = joinRel(rel, f.name)
       rows.push(h('div', { key: 'f:' + rel2, className: 'fs-row', style: { paddingLeft: 6 + (rel.split('/').filter(Boolean).length + 1) * 16 } },
+        h('input', { type: 'checkbox', className: 'fs-check', title: '选择以便打包下载', checked: sel.has(rel2), onClick: (e) => e.stopPropagation(), onChange: () => toggleSel(rel2) }),
         h('span', { className: 'fs-caret' }),
         h('span', { className: 'fs-ic' }, '📄'),
         h('span', { className: 'fs-nm', title: `${f.name}（点击预览）`, style: { cursor: 'pointer' }, onClick: () => openPreview(rel2, f.name, f.size) }, f.name),
@@ -381,6 +431,13 @@ function FileManagerTab(props) {
         '上传', h('input', { type: 'file', multiple: true, className: 'fs-file', onChange: (e) => { void upload(e.target.files); e.target.value = '' } }),
       ),
     ),
+    sel.size > 0 && h('div', { className: 'fs-selbar' },
+      h('span', null, `已选 ${sel.size} 项`),
+      h('button', { className: 'fs-btn', disabled: busy, style: { color: 'var(--dsw-alias-brand-primary)' }, onClick: () => void zipDownload([...sel]) }, '打包下载'),
+      h('button', { className: 'fs-btn', disabled: busy, onClick: () => setSel(new Set()) }, '取消'),
+      h('span', { className: 'spacer' }),
+      h('span', { className: 'muted' }, '文件与文件夹可混选，打包为 zip（保留目录结构）'),
+    ),
     h('div', { className: 'fs-body' },
       error && h('div', { className: 'fs-empty', style: { color: 'var(--dsw-alias-state-error-primary)' } }, error),
       !error && !rootChildrenLoaded && h('div', { className: 'fs-spin' }, '加载目录树…'),
@@ -388,7 +445,7 @@ function FileManagerTab(props) {
       renderLevel(''),
     ),
     h('div', { className: 'fs-note' },
-      hint || '点击文件名或行内「预览」查看内容；上传/新建作用于当前目录（点击目录名展开并切换）；文件行悬停出现操作按钮。'),
+      hint || '点击文件名或行内「预览」查看内容；悬停文件行可 下载 / @ / 改名 / 删除，悬停目录行可 整目录打包下载；勾选多项后可批量打包下载。'),
     preview && h(FilePreviewOverlay, {
       sessionId,
       workspace: ws && ws.workspace,

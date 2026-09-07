@@ -4,8 +4,8 @@
 # The plugin is HOST-PLANE: it reads host services (sessions, webServer) to
 # (a) resolve each request's session workspace (ctx.sessions.get().header.cwd),
 # (b) serve same-origin file-management routes under /dsh-file-share/api
-# (list/download/upload/mkdir/rename/delete, path-bound to the workspace) for
-# its conversation.view「文件」tab client. It must land in the host composition
+# (list/download/download-zip/upload/mkdir/rename/delete, path-bound to the
+# workspace) for its conversation.view「文件」tab client. It must land in the host composition
 # (this insert), never inside an agent preset.
 
 - insert:
