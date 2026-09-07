@@ -18,9 +18,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 const http = require('node:http')
 const crypto = require('node:crypto')
+const zlib = require('node:zlib')
 
 const VERSION = '0.1.0'
 const MAX_LIST_ENTRIES = 5000
+const MAX_ZIP_ENTRIES = 4000
+const MAX_ZIP_UNCOMPRESSED = 128 * 1024 * 1024
 
 /** 名称级别的敏感匹配：出现在任何一层路径段即拒绝列目录 / 下载 / 删除 / 上传。 */
 const SENSITIVE_PATTERNS = [
@@ -183,6 +186,151 @@ function sendDownload(req, res, root, rel, hideSensitive) {
   const rs = fs.createReadStream(abs)
   rs.on('error', () => { try { res.destroy() } catch {} })
   rs.pipe(res)
+}
+
+// ── zip 打包下载（文件夹 / 多选）────────────────────────────────────────────
+// 零依赖：ZIP 结构手写（目录条目 STORE，文件条目 deflateRaw），上限内同步构建。
+
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)
+    t[n] = c
+  }
+  return t
+})()
+
+function crc32(buf) {
+  let c = -1
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8)
+  return (c ^ -1) >>> 0
+}
+
+function dosDateTime(ms) {
+  const d = new Date(ms)
+  const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)
+  const date = ((Math.max(0, d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate())
+  return { time: time & 0xFFFF, date: date & 0xFFFF }
+}
+
+/** entries: [{ name, data?, isDir?, mtime? }] → Buffer（本地头 + 中央目录 + EOCD，UTF-8 名）。 */
+function buildZip(entries) {
+  const locals = []
+  const centrals = []
+  let offset = 0
+  for (const ent of entries) {
+    const nameBuf = Buffer.from(ent.name, 'utf8')
+    const data = ent.isDir || !ent.data ? Buffer.alloc(0) : ent.data
+    const method = ent.isDir ? 0 : 8
+    const compressed = ent.isDir ? data : zlib.deflateRawSync(data)
+    const { time, date } = dosDateTime(ent.mtime || Date.now())
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6) // UTF-8 文件名
+    local.writeUInt16LE(method, 8)
+    local.writeUInt16LE(time, 10)
+    local.writeUInt16LE(date, 12)
+    local.writeUInt32LE(crc32(data), 14)
+    local.writeUInt32LE(compressed.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(nameBuf.length, 26)
+    locals.push(local, nameBuf, compressed)
+
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(0x0800, 8)
+    central.writeUInt16LE(method, 10)
+    central.writeUInt16LE(time, 12)
+    central.writeUInt16LE(date, 14)
+    central.writeUInt32LE(crc32(data), 16)
+    central.writeUInt32LE(compressed.length, 20)
+    central.writeUInt32LE(data.length, 24)
+    central.writeUInt16LE(nameBuf.length, 28)
+    central.writeUInt32LE(ent.isDir ? 0x10 : 0, 38) // MS-DOS 目录位
+    central.writeUInt32LE(offset, 42)
+    centrals.push(central, nameBuf)
+
+    offset += 30 + nameBuf.length + compressed.length
+  }
+  const centralBuf = Buffer.concat(centrals)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(entries.length, 8)
+  eocd.writeUInt16LE(entries.length, 10)
+  eocd.writeUInt32LE(centralBuf.length, 12)
+  eocd.writeUInt32LE(offset, 16)
+  return Buffer.concat([...locals, centralBuf, eocd])
+}
+
+/**
+ * 收集并响应 zip 下载。rels 为相对工作区的路径（可多个，文件/目录混选）；
+ * 目录递归展开，zip 内保留相对路径结构；敏感名按 hideSensitive 过滤/拒绝，
+ * 递归中符号链接逃逸出 root 的条目跳过。entries/字节双上限防失控。
+ */
+function sendDownloadZip(res, root, rels, opts) {
+  const hideSensitive = opts.hideSensitive !== false
+  const maxEntries = opts.zipMaxEntries > 0 ? opts.zipMaxEntries : MAX_ZIP_ENTRIES
+  const maxBytes = opts.zipMaxBytes > 0 ? opts.zipMaxBytes : MAX_ZIP_UNCOMPRESSED
+  const uniq = [...new Set((Array.isArray(rels) ? rels : []).map((r) => String(r || '').replace(/^\/+|\/+$/g, '')).filter(Boolean))]
+  if (uniq.length === 0) throw new ShareError(400, '未选择要下载的路径')
+
+  const realRoot = fs.realpathSync(ensureRoot(root))
+  const entries = []
+  let total = 0
+  const addFile = (abs, zipName, st) => {
+    if (entries.length >= maxEntries) throw new ShareError(413, `条目数超过上限 ${maxEntries}，请分批下载`)
+    const data = fs.readFileSync(abs)
+    total += data.length
+    if (total > maxBytes) throw new ShareError(413, `总大小超过上限 ${Math.round(maxBytes / 1048576)}MB，请分批下载`)
+    entries.push({ name: zipName, data, mtime: st.mtimeMs })
+  }
+  const addDir = (zipName, mtime) => {
+    if (entries.length >= maxEntries) throw new ShareError(413, `条目数超过上限 ${maxEntries}，请分批下载`)
+    entries.push({ name: zipName, isDir: true, mtime })
+  }
+  const walk = (abs, zipName, depth) => {
+    if (depth > 32) return
+    addDir(zipName + '/', fs.statSync(abs).mtimeMs)
+    let names = []
+    try { names = fs.readdirSync(abs) } catch { return }
+    for (const name of names) {
+      if (hideSensitive && isHiddenName(name)) continue
+      const child = path.join(abs, name)
+      try {
+        if (!insideReal(realRoot, fs.realpathSync(child))) continue // 符号链接逃逸，跳过
+      } catch { continue }
+      let st
+      try { st = fs.statSync(child) } catch { continue }
+      if (st.isDirectory()) walk(child, zipName + '/' + name, depth + 1)
+      else if (st.isFile()) addFile(child, zipName + '/' + name, st)
+    }
+  }
+
+  for (const rel of uniq) {
+    if (hideSensitive && relIsHidden(rel)) throw new ShareError(403, `敏感路径不可下载: ${rel}`)
+    const abs = resolveExisting(root, rel)
+    const st = fs.statSync(abs)
+    if (st.isDirectory()) walk(abs, rel, 0)
+    else if (st.isFile()) addFile(abs, rel, st)
+  }
+  if (entries.length === 0) throw new ShareError(404, '所选路径没有可下载的内容')
+
+  const zip = buildZip(entries)
+  let name = String(opts.name || '').replace(/[\\/]/g, '').trim()
+  if (name.length > 100) name = name.slice(0, 100)
+  if (!name) name = uniq.length === 1 ? `${path.basename(uniq[0]) || 'download'}.zip` : 'download.zip'
+  if (!/\.zip$/i.test(name)) name += '.zip'
+  res.writeHead(200, {
+    'content-type': 'application/zip',
+    'content-length': zip.length,
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+    'cache-control': 'no-store',
+  })
+  res.end(zip)
 }
 
 /** 上传：原始 body 流式落盘（临时文件 + 原子 rename），拒绝覆盖与敏感名。 */
@@ -427,7 +575,7 @@ function renderList(entries){
     r.appendChild(nm)
     var sz=document.createElement('span'); sz.className='sz'; sz.textContent=e.type==='dir'?'':fmt(e.size); r.appendChild(sz)
     var ops=document.createElement('span'); ops.className='ops'
-    var dl=document.createElement('button'); dl.className='btn'; dl.textContent='下载'; dl.onclick=function(){location.href='/api/download?path='+enc(join(cur,e.name))+'&'+qs()}
+    var dl=document.createElement('button'); dl.className='btn'; dl.textContent='下载'; dl.onclick=function(){ var u=e.type==='dir'?'/api/download-zip?path=':'/api/download?path='; location.href=u+enc(join(cur,e.name))+'&'+qs() }
     ops.appendChild(dl)
     if(!metaReadOnly){
       var rn=document.createElement('button'); rn.className='btn'; rn.textContent='改名'; rn.onclick=function(){renameNow(join(cur,e.name),e.name)}
@@ -485,6 +633,15 @@ async function routeShare(req, res, url, opts) {
     }
     if (req.method === 'GET' && p === '/api/download') {
       sendDownload(req, res, opts.root, url.searchParams.get('path') || '', opts.hideSensitive !== false)
+      return
+    }
+    if (req.method === 'GET' && p === '/api/download-zip') {
+      sendDownloadZip(res, opts.root, url.searchParams.getAll('path'), {
+        hideSensitive: opts.hideSensitive !== false,
+        zipMaxEntries: opts.zipMaxEntries,
+        zipMaxBytes: opts.zipMaxBytes,
+        name: url.searchParams.get('name') || '',
+      })
       return
     }
     if (req.method === 'POST' && p === '/api/upload') {
@@ -548,10 +705,10 @@ function createShareServer(opts) {
 }
 
 module.exports = {
-  VERSION, MAX_LIST_ENTRIES, ShareError,
+  VERSION, MAX_LIST_ENTRIES, MAX_ZIP_ENTRIES, MAX_ZIP_UNCOMPRESSED, ShareError,
   isHiddenName, relIsHidden, ensureRoot,
   resolveExisting, resolveCreatable,
-  listDir, sendDownload, receiveUpload, mkdirEntry, renameEntry, deleteEntry,
+  listDir, sendDownload, sendDownloadZip, buildZip, receiveUpload, mkdirEntry, renameEntry, deleteEntry,
   tokenOk, extractToken, makeLimiter, statusPayload,
   routeShare, handleRequest, createShareServer, HTML_PAGE,
 }
