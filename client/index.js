@@ -97,16 +97,27 @@ const S = (sid, extra) => {
   return p.toString()
 }
 
-/** @绝对路径 → composer（工作区文件可被宿主 file-reference 解析）。 */
+/** @绝对路径 → composer（工作区文件可被宿主 file-reference 解析）。\n *  composer 双形态兼容：textarea（旧）/ contenteditable 输入区（2026-09 新组合——只找 textarea 会静默退化成剪贴板，dsh-kb v0.3.1 同款修法）。 */
 function insertFileRef(sessionId, abs) {
   const text = '@' + abs + ' '
   try {
     const card = document.querySelector('[data-composer-card]')
     const ta = card && card.querySelector('textarea')
-    if (ta && typeof document.execCommand === 'function') {
-      ta.focus()
-      const len = ta.value ? ta.value.length : 0
-      try { ta.setSelectionRange(len, len) } catch {}
+    const ce = card && (card.querySelector('[contenteditable="true"]') || card.querySelector('[contenteditable=""]'))
+    if (typeof document.execCommand === 'function' && (ta || ce)) {
+      if (ta) {
+        ta.focus()
+        const len = ta.value ? ta.value.length : 0
+        try { ta.setSelectionRange(len, len) } catch {}
+      } else if (ce) {
+        ce.focus()
+        const sel = window.getSelection()
+        const range = document.createRange()
+        range.selectNodeContents(ce)
+        range.collapse(false) // 光标到末尾
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
       if (document.execCommand('insertText', false, text)) return 'ok'
     }
   } catch {}
