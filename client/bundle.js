@@ -107,6 +107,8 @@ window.__ModuleLoader__.load({
       return p.toString()
     }
 
+    let sessionsSvc = null // 会话服务（@ 成功后切回对话 tab；动态 inject）
+
     /** @绝对路径 → composer（工作区文件可被宿主 file-reference 解析）。\n *  composer 双形态兼容：textarea（旧）/ contenteditable 输入区（2026-09 新组合——只找 textarea 会静默退化成剪贴板，dsh-kb v0.3.1 同款修法）。 */
     function insertFileRef(sessionId, abs) {
       const text = '@' + abs + ' '
@@ -361,9 +363,13 @@ window.__ModuleLoader__.load({
         if (!ws || !ws.workspace) { setHint('工作区不可用'); return }
         const abs = ws.workspace.replace(/\/+$/, '') + '/' + joinRel(rel, name)
         const result = insertFileRef(sessionId, abs)
-        if (result === 'ok') setHint(`已把 @${joinRel(rel, name)} 插入输入框`)
-        else setHint('无法自动插入，已复制到剪贴板，请在输入框粘贴')
-        setTimeout(() => setHint(null), 3500)
+        if (result === 'ok') {
+          // 切回对话 tab（会话深链 open 对当前会话即激活对话视图），草稿已就位
+          try { if (sessionsSvc && typeof sessionsSvc.open === 'function') sessionsSvc.open(sessionId) } catch {}
+        } else {
+          setHint('无法自动插入，已复制到剪贴板，请在输入框粘贴')
+          setTimeout(() => setHint(null), 3500)
+        }
       }
 
       const openPreview = (rel, name, size) => setPreview({ rel, name, size })
@@ -397,6 +403,7 @@ window.__ModuleLoader__.load({
             h('span', { className: 'fs-nm dir', title: d.name, onClick: () => toggle(sub, d.name) }, d.name),
             h('span', { className: 'fs-ops' },
               h('button', { onClick: (e) => { e.stopPropagation(); toggle(sub, d.name) } }, '进入'),
+              h('button', { className: 'at', title: '@ 目录给 agent', onClick: (e) => { e.stopPropagation(); atRef(rel, d.name) } }, '@'),
               h('button', { disabled: busy, onClick: (e) => { e.stopPropagation(); void zipDownload([sub]) } }, '下载'),
               h('button', { onClick: (e) => { e.stopPropagation(); rename(sub, d.name) } }, '改名'),
               h('button', { className: 'danger', onClick: (e) => { e.stopPropagation(); remove(sub, d.name, true) } }, '删除'),
@@ -487,6 +494,11 @@ window.__ModuleLoader__.load({
         const slots = ctx.get('slots')
         if (slots === undefined) return
         // 不 return 任何值（cordis-plugin-loader 把 apply 返回值当 disposable/effect）。
+
+        // 会话服务：@ 之后 sessions.open(sessionId) 切回对话 tab（动态 inject）
+        try {
+          if (typeof ctx.inject === 'function') ctx.inject(['sessions'], (scope) => { sessionsSvc = scope && scope.sessions })
+        } catch (e) { console.error('[dsh-file-share] sessions inject:', e) }
 
         if (typeof slots.inject === 'function') {
           slots.inject('conversation.view', () => slots.register(
