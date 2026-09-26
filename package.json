@@ -1,6 +1,6 @@
 {
   "name": "@weibaohui/dsh-file-share",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "dsh 插件 · 会话工作区文件管理：在对话区加「文件」tab，浏览当前会话工作区的目录树并就地管理（预览/上传/下载/新建文件夹/改名/删除/搜索），文件夹与多选文件可打包 zip 下载，文件可 @ 进对话框给 agent 处理。",
   "repository": {
     "type": "git",
@@ -19,7 +19,6 @@
   "files": [
     "src",
     "client",
-    "docs",
     "scripts",
     "cordis.patch.yml",
     "README.md"
