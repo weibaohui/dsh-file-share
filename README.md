@@ -5,7 +5,7 @@
 
 **会话工作区文件管理插件**：在对话区顶部加一个「文件」tab，点开即可浏览、预览并管理**当前会话工作区**下的所有文件。
 
-![demo](https://raw.githubusercontent.com/weibaohui/dsh-file-share/main/docs/demo.gif)
+![demo](https://cdn.jsdelivr.net/gh/weibaohui/dsh-file-share@main/docs/demo.gif)
 
 ## 核心功能
 
