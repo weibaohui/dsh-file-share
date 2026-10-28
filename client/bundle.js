@@ -21,7 +21,14 @@ window.__ModuleLoader__.load({
      * 数据通道：宿主同源路由 /dsh-file-share/api（带 sessionId，服务端以会话工作区为根）。
      */
 
-    const API = '/dsh-file-share/api'
+    // API 基址随页面走：子路径反代（如 https://host/app/dsh/）下，绝对路径 /dsh-file-share/api
+    // 会打到站点根而 404。与宿主官方客户端一致，用 document.baseURI 推导（dsh-sync#14 同款）。
+    const API = (() => {
+      try {
+        const base = (typeof document !== 'undefined' && document.baseURI) || (typeof location !== 'undefined' ? location.href : '/')
+        return new URL('dsh-file-share/api', new URL('.', base)).pathname.replace(/\/+$/, '')
+      } catch { return '/dsh-file-share/api' }
+    })()
 
     const styles = {
       _head: null,
